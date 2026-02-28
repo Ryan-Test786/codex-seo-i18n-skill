@@ -1,0 +1,4 @@
+interface:
+  display_name: "SEO Trinity I18n Agent"
+  short_description: "Generate SEO JSON in zh/en/zh-hant and multilingual outputs"
+  default_prompt: "Use $seo-i18n to build and verify SEO JSON content and i18n outputs from scenario materials."

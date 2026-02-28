@@ -1,0 +1,54 @@
+{
+  "meta": {
+    "scenario_id": "example-scenario",
+    "source_files": [],
+    "notes": ""
+  },
+  "page": {
+    "route": "/example-cloud-phone/",
+    "name": "Example",
+    "keyword": "example-cloud-phone"
+  },
+  "content_blocks": {
+    "head": {
+      "title": "",
+      "description": "",
+      "list": []
+    },
+    "module_items": [
+      {
+        "title": "",
+        "description": "",
+        "heading": "",
+        "detail": "",
+        "advantageList": []
+      }
+    ],
+    "reason": {
+      "title": "",
+      "subtitle": "",
+      "items": [
+        {
+          "title": "",
+          "description": ""
+        }
+      ]
+    },
+    "workflow": {
+      "title": "",
+      "subtitle": "",
+      "items": [
+        {
+          "title": "",
+          "description": "",
+          "href": ""
+        }
+      ]
+    }
+  },
+  "assets": {
+    "logo": "",
+    "image_urls": [],
+    "image_alts": []
+  }
+}
