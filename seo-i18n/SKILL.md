@@ -1,16 +1,66 @@
 ---
 name: seo-i18n
-description: "Build SEO-ready JSON copy and multilingual locale files for scenario pages. Use when a user provides a source folder (designs/code, keywords, prohibited terms, competitor notes, or handwritten requirements) and needs: (1) structured content abstraction, (2) manual zh/en/zh-hant copy authoring with review loops, (3) multi-scenario expansion, and (4) API-based translation from English to additional languages while preserving URLs and UTF-8 integrity."
+description: "SEO + translation expert with two modes: (A) direct JSON-object multilingual translation, and (B) full SEO trilingual workflow with abstraction, manual core zh/en/zh-hant authoring, scenario expansion, and scripted translation to additional locales."
 ---
 
 # SEO Trinity I18n Agent
 
 ## Overview
 
-Implement a six-step workflow for SEO content production:
-extract structure -> confirm -> manually author core trilingual files -> expand scenarios -> manually author all trilingual variants -> script-translate from English to other locales with full QA.
+This agent supports two execution modes:
+- Mode A: Direct JSON Translation (user provides JSON object/file and target languages)
+- Mode B: Full SEO Workflow (original six-step abstraction + core-trilingual manual authoring pipeline)
 
-## Workflow
+## Mode Selection Gate
+
+At the start of every task, decide mode first:
+- if user explicitly specifies Mode A or Mode B, follow the user-specified mode directly
+- choose Mode A when user already provides a JSON object (or asks for translation-only)
+- choose Mode B when user provides design/code/keyword/prohibited-term/competitor package for full SEO production
+- if intent is ambiguous, ask one short clarification question before generating outputs
+
+## Mode A: Direct JSON Translation
+
+### Step A1: Collect JSON Translation Input
+
+Required:
+- JSON object or JSON file path
+- source language (default can be `en` if user confirms)
+- target languages list
+
+Optional:
+- output naming/code rule
+- additional non-translatable fields
+- glossary / prohibited terms
+
+Read `references/direct-json-input.md` for required format.
+
+### Step A2: Normalize and Confirm
+
+Normalize to UTF-8 JSON and confirm:
+- schema should remain unchanged unless user explicitly asks to change
+- URL/path/resource-like values must remain unchanged
+- confirm the language list and output naming before execution
+
+### Step A3: Run Translation Script
+
+Use:
+- `scripts/translate-json-object.mjs` (direct JSON object/file translation)
+- `scripts/audit-output.mjs` (post-translation audit)
+
+Run one sample first when user requests cautious rollout; otherwise run all requested languages.
+
+### Step A4: QA and Delivery
+
+Validate:
+- JSON parse success
+- UTF-8 integrity
+- invariant fields (`keyword`, `route`, `path`, `href`, `image_url`) unchanged
+- no empty output files
+
+If anomalies appear, patch and re-run audit until clean.
+
+## Mode B: Full SEO Workflow (Original)
 
 ### Step 1: Collect Input Package
 
@@ -27,6 +77,7 @@ Read `references/input-package.md` for required and optional inputs.
 ### Step 2: Abstract Content to JSON and Confirm
 
 Extract page copy blocks and image resources from design/code into a normalized JSON file.
+If the user directly provides a normalized/usable JSON for Mode B, you may skip extraction and move to confirmation.
 Use `references/abstraction-template.json` as the baseline shape.
 Do not continue until the user confirms the abstraction is correct.
 If the user requests changes, update the abstraction and re-confirm.
@@ -104,10 +155,12 @@ If anomalies are found, report to user, patch, and re-run audit until no issue r
 ## Resources (optional)
 
 ### scripts/
+- `scripts/translate-json-object.mjs`
 - `scripts/translate-other-languages.mjs`
 - `scripts/audit-output.mjs`
 
 ### references/
+- `references/direct-json-input.md`
 - `references/input-package.md`
 - `references/abstraction-template.json`
 - `references/review-checklist.md`

@@ -4,9 +4,9 @@
 
 ## 1. 这个 Skill 能做什么
 
-- 将场景页面内容抽象为标准化 JSON。
-- 按人工编写流程产出核心 `zh` / `en` / `zh-hant` 文件。
-- 使用腾讯混元 API 脚本将英文扩展翻译到其他语种。
+- 支持两种模式：
+- 模式 A：直接接收 JSON 对象/文件并翻译到指定多语言。
+- 模式 B：将场景页面内容抽象为标准化 JSON，再走完整 SEO 三语与多语流程。
 - 在多语言输出中保持 URL/path/resource 字段不变。
 
 ## 2. 目录结构
@@ -34,26 +34,19 @@ skills/seo-i18n/
 ### Windows（PowerShell）
 
 ```powershell
-python "$HOME/.codex/skills/.system/skill-installer/scripts/install-skill-from-github.py" `
-  --repo <owner>/<repo> `
-  --path skills/seo-i18n `
-  --ref v1.0.0
+Get-ChildItem "$env:TEMP\codex" -Directory -Filter "skill-install-*" -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force; Remove-Item "$HOME\.codex\skills\seo-i18n" -Recurse -Force -ErrorAction SilentlyContinue; python "$HOME\.codex\skills\.system\skill-installer\scripts\install-skill-from-github.py" --repo Ryan-Test786/codex-seo-i18n-skill --path seo-i18n --ref master --method download
 ```
 
 ### Linux/macOS（bash/zsh）
 
 ```bash
-python "$HOME/.codex/skills/.system/skill-installer/scripts/install-skill-from-github.py" \
-  --repo <owner>/<repo> \
-  --path skills/seo-i18n \
-  --ref v1.0.0
+python "$HOME/.codex/skills/.system/skill-installer/scripts/install-skill-from-github.py"   --repo <owner>/<repo>   --path skills/seo-i18n   --ref v1.0.0
 ```
 
 也可以使用 URL 安装：
 
 ```bash
-python "$HOME/.codex/skills/.system/skill-installer/scripts/install-skill-from-github.py" \
-  --url https://github.com/<owner>/<repo>/tree/v1.0.0/skills/seo-i18n
+python "$HOME/.codex/skills/.system/skill-installer/scripts/install-skill-from-github.py"   --url https://github.com/<owner>/<repo>/tree/v1.0.0/skills/seo-i18n
 ```
 
 安装完成后请重启 Codex，才能加载新 skill。
@@ -132,7 +125,52 @@ source ~/.zshrc
 重启后，输入类似提示词：
 
 ```text
-Use $seo-i18n to process my scenario input package.
+Mode A: Use $seo-i18n to translate my JSON object from en to ja,ko,th while preserving URL/path fields.
+Mode B: Use $seo-i18n to process my scenario input package.
 ```
 
 若 skill 加载成功，Codex 会按 `SKILL.md` 中的 `seo-i18n` 工作流执行。
+
+## 9. 脚本用法
+
+### 模式 A：JSON 对象直译
+
+```powershell
+node .\scripts\translate-json-object.mjs `
+  --input-file .\examples\demo-en.json `
+  --output-dir .\out `
+  --source-lang en `
+  --langs ja,ko,th `
+  --force
+```
+
+默认会在翻译后自动执行结构/不变字段审计。  
+如需关闭：追加 `--no-audit`。
+
+可选参数：
+- `--code <name>` 自定义输出文件名前缀
+- `--invariant-keys key1,key2` 追加不可翻译字段
+- `--config <path>` 指定密钥配置文件
+
+### 模式 B：原有批量翻译
+
+```powershell
+node .\scripts\translate-other-languages.mjs `
+  --input-dir .\core `
+  --output-dir .\out `
+  --source-lang en `
+  --langs ja,ko,th
+```
+
+默认会在翻译后自动执行结构/不变字段审计。  
+如需关闭：追加 `--no-audit`。
+
+翻译后审计：
+
+```powershell
+node .\scripts\audit-output.mjs `
+  --source-dir .\core `
+  --target-dir .\out `
+  --source-lang en `
+  --langs ja,ko,th
+```

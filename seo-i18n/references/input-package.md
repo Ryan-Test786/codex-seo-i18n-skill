@@ -1,5 +1,8 @@
 # Input Package
 
+This document applies to Mode B (Full SEO Workflow).  
+For Mode A (Direct JSON Translation), use `references/direct-json-input.md`.
+
 Provide one directory that includes all available materials, then share the directory path.
 
 ## Required

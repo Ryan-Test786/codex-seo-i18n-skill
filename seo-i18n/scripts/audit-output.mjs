@@ -3,7 +3,7 @@ import path from "path";
 import process from "process";
 
 const DEFAULT_SOURCE_LANG = "en";
-const INVARIANT_KEYS = new Set(["path", "href", "image_url"]);
+const INVARIANT_KEYS = new Set(["keyword", "path", "route", "href", "image_url"]);
 
 function parseArgs(argv) {
   const out = {
@@ -76,11 +76,27 @@ function readUtf8File(filePath) {
   return raw.replace(/^\uFEFF/, "");
 }
 
+function assertReadableDir(dir, flagName) {
+  if (!dir) {
+    throw new Error(`Missing required argument: ${flagName}`);
+  }
+  if (!fs.existsSync(dir)) {
+    throw new Error(`Directory not found (${flagName}): ${dir}`);
+  }
+  const stat = fs.statSync(dir);
+  if (!stat.isDirectory()) {
+    throw new Error(`Not a directory (${flagName}): ${dir}`);
+  }
+}
+
 function compareInvariantValues(source, target, pointer = "$", issues = []) {
   if (Array.isArray(source)) {
     if (!Array.isArray(target)) {
       issues.push(`${pointer}: target type mismatch (expected array)`);
       return issues;
+    }
+    if (target.length !== source.length) {
+      issues.push(`${pointer}: array length mismatch (expected ${source.length}, got ${target.length})`);
     }
     const len = Math.min(source.length, target.length);
     for (let i = 0; i < len; i++) {
@@ -109,6 +125,18 @@ function compareInvariantValues(source, target, pointer = "$", issues = []) {
       }
       compareInvariantValues(v, target[k], next, issues);
     }
+    for (const k of Object.keys(target)) {
+      if (!(k in source)) {
+        issues.push(`${pointer}.${k}: unexpected key in target`);
+      }
+    }
+    return issues;
+  }
+
+  const sourceType = source === null ? "null" : typeof source;
+  const targetType = target === null ? "null" : typeof target;
+  if (sourceType !== targetType) {
+    issues.push(`${pointer}: target type mismatch (expected ${sourceType}, got ${targetType})`);
   }
   return issues;
 }
@@ -119,12 +147,22 @@ function main() {
     usage();
     process.exit(1);
   }
+  if (args.langs.includes(args.sourceLang)) {
+    console.error(`Target langs cannot include source lang '${args.sourceLang}'.`);
+    process.exit(1);
+  }
+  assertReadableDir(args.sourceDir, "--source-dir");
+  assertReadableDir(args.targetDir, "--target-dir");
 
   const sourceFiles = listSourceFiles(args.sourceDir, args.sourceLang).filter((file) => {
     if (args.codes.length === 0) return true;
     const code = getCodeFromFilename(path.basename(file), args.sourceLang);
     return code && args.codes.includes(code);
   });
+  if (sourceFiles.length === 0) {
+    console.error(`No source files found in ${args.sourceDir} with suffix -${args.sourceLang}.json`);
+    process.exit(1);
+  }
 
   const issues = [];
   let expected = 0;

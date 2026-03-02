@@ -8,21 +8,18 @@ const DEFAULT_MODEL = "hunyuan-translation-lite";
 const DEFAULT_SOURCE_LANG = "en";
 const SEP = "\n<<<SEP>>>\n";
 
-const TRANSLATE_KEYS = new Set([
-  "name",
-  "title",
-  "description",
-  "subtitle",
-  "heading",
-  "detail",
-  "text",
-  "button_text",
-  "image_alt",
-  "alt",
+const DEFAULT_INVARIANT_KEYS = new Set([
+  "keyword",
+  "route",
+  "path",
+  "href",
+  "image_url",
+  "url",
+  "uri",
+  "slug",
+  "src",
 ]);
 
-const TRANSLATE_ARRAY_KEYS = new Set(["list", "advantageList"]);
-const SKIP_KEYS = new Set(["keyword", "path", "route", "href", "image_url"]);
 const SKIP_VALUE_PATTERNS = [
   /^https?:\/\//i,
   /^@\//,
@@ -32,20 +29,21 @@ const SKIP_VALUE_PATTERNS = [
 
 function parseArgs(argv) {
   const out = {
-    inputDir: "",
+    inputFile: "",
     outputDir: "",
     configPath: "",
     sourceLang: DEFAULT_SOURCE_LANG,
     model: DEFAULT_MODEL,
     langs: [],
-    codes: [],
+    code: "",
+    invariantKeys: [],
     force: false,
     audit: true,
   };
 
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
-    if (a === "--input-dir" && argv[i + 1]) out.inputDir = argv[++i];
+    if (a === "--input-file" && argv[i + 1]) out.inputFile = argv[++i];
     else if (a === "--output-dir" && argv[i + 1]) out.outputDir = argv[++i];
     else if (a === "--config" && argv[i + 1]) out.configPath = argv[++i];
     else if (a === "--source-lang" && argv[i + 1]) out.sourceLang = argv[++i].toLowerCase();
@@ -55,22 +53,28 @@ function parseArgs(argv) {
         .split(",")
         .map((v) => v.trim().toLowerCase())
         .filter(Boolean);
-    } else if (a === "--codes" && argv[i + 1]) {
-      out.codes = argv[++i]
+    } else if (a === "--code" && argv[i + 1]) {
+      out.code = argv[++i].trim();
+    } else if (a === "--invariant-keys" && argv[i + 1]) {
+      out.invariantKeys = argv[++i]
         .split(",")
         .map((v) => v.trim().toLowerCase())
         .filter(Boolean);
-    } else if (a === "--force") out.force = true;
-    else if (a === "--no-audit") out.audit = false;
+    } else if (a === "--force") {
+      out.force = true;
+    } else if (a === "--no-audit") {
+      out.audit = false;
+    }
   }
+
   out.langs = Array.from(new Set(out.langs));
-  out.codes = Array.from(new Set(out.codes));
+  out.invariantKeys = Array.from(new Set(out.invariantKeys));
   return out;
 }
 
 function usage() {
   console.log(
-    "Usage: node translate-other-languages.mjs --input-dir <dir> --output-dir <dir> --langs <lang1,lang2,...> [--codes <code1,code2,...>] [--config <path>] [--source-lang en] [--model hunyuan-translation] [--force] [--no-audit]"
+    "Usage: node translate-json-object.mjs --input-file <file> --output-dir <dir> --langs <lang1,lang2,...> [--source-lang en] [--code scenario] [--invariant-keys key1,key2] [--config <path>] [--model hunyuan-translation-lite] [--force] [--no-audit]"
   );
 }
 
@@ -81,14 +85,16 @@ function resolveDefaultConfigPath() {
   return path.resolve(process.cwd(), "skills", "seo-i18n", "config.json");
 }
 
-function escapeRegex(value) {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+function assertReadableFile(filePath, flagName) {
+  if (!filePath) throw new Error(`Missing required argument: ${flagName}`);
+  if (!fs.existsSync(filePath)) throw new Error(`File not found (${flagName}): ${filePath}`);
+  if (!fs.statSync(filePath).isFile()) throw new Error(`Not a file (${flagName}): ${filePath}`);
 }
 
-function getStemFromFilename(filename, sourceLang) {
-  const pattern = new RegExp(`^(.+)-${escapeRegex(sourceLang)}\\.json$`);
-  const m = filename.match(pattern);
-  return m ? m[1].toLowerCase() : null;
+function ensureDir(dir, flagName) {
+  if (!dir) throw new Error(`Missing required argument: ${flagName}`);
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  if (!fs.statSync(dir).isDirectory()) throw new Error(`Not a directory (${flagName}): ${dir}`);
 }
 
 function loadCredentials(configPathArg) {
@@ -109,91 +115,67 @@ function loadCredentials(configPathArg) {
   return { secretId, secretKey, configPath };
 }
 
+function isInvariantKey(key, invariantKeys) {
+  if (!key) return false;
+  const normalized = String(key).toLowerCase();
+  if (invariantKeys.has(normalized)) return true;
+  if (/(^|_)(url|uri|path|href|route|slug|src)$/.test(normalized)) return true;
+  return false;
+}
+
 function shouldSkipValue(v) {
   return SKIP_VALUE_PATTERNS.some((re) => re.test(v));
 }
 
-function ensureDir(dir) {
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+function shouldTranslateString(value, key, invariantKeys) {
+  if (typeof value !== "string") return false;
+  if (!value.trim()) return false;
+  if (isInvariantKey(key, invariantKeys)) return false;
+  if (shouldSkipValue(value)) return false;
+  return true;
 }
 
-function assertReadableDir(dir, flagName) {
-  if (!dir) {
-    throw new Error(`Missing required argument: ${flagName}`);
-  }
-  if (!fs.existsSync(dir)) {
-    throw new Error(`Directory not found (${flagName}): ${dir}`);
-  }
-  const stat = fs.statSync(dir);
-  if (!stat.isDirectory()) {
-    throw new Error(`Not a directory (${flagName}): ${dir}`);
-  }
-}
-
-function listSourceFiles(inputDir, sourceLang) {
-  const suffix = `-${sourceLang}.json`;
-  return fs
-    .readdirSync(inputDir)
-    .filter((f) => f.endsWith(suffix))
-    .map((f) => path.join(inputDir, f));
-}
-
-function collectTranslatables(obj, key = null, out = []) {
-  if (typeof obj === "string") {
-    if (key && TRANSLATE_KEYS.has(key) && !SKIP_KEYS.has(key) && !shouldSkipValue(obj)) {
-      out.push(obj);
-    }
+function collectTranslatables(node, key = null, invariantKeys, out = []) {
+  if (typeof node === "string") {
+    if (shouldTranslateString(node, key, invariantKeys)) out.push(node);
     return out;
   }
 
-  if (Array.isArray(obj)) {
-    if (key && TRANSLATE_ARRAY_KEYS.has(key)) {
-      for (const item of obj) {
-        if (typeof item === "string" && !shouldSkipValue(item)) out.push(item);
-      }
-      return out;
-    }
-    for (const item of obj) collectTranslatables(item, null, out);
+  if (Array.isArray(node)) {
+    for (const item of node) collectTranslatables(item, key, invariantKeys, out);
     return out;
   }
 
-  if (obj && typeof obj === "object") {
-    for (const [k, v] of Object.entries(obj)) {
-      collectTranslatables(v, k, out);
+  if (node && typeof node === "object") {
+    for (const [k, v] of Object.entries(node)) {
+      collectTranslatables(v, k, invariantKeys, out);
     }
   }
+
   return out;
 }
 
-function applyTranslations(obj, translatedMap, key = null) {
-  if (typeof obj === "string") {
-    if (key && TRANSLATE_KEYS.has(key) && !SKIP_KEYS.has(key) && !shouldSkipValue(obj)) {
-      return translatedMap.get(obj) ?? obj;
+function applyTranslations(node, translatedMap, key = null, invariantKeys) {
+  if (typeof node === "string") {
+    if (shouldTranslateString(node, key, invariantKeys)) {
+      return translatedMap.get(node) ?? node;
     }
-    return obj;
+    return node;
   }
 
-  if (Array.isArray(obj)) {
-    if (key && TRANSLATE_ARRAY_KEYS.has(key)) {
-      return obj.map((item) => {
-        if (typeof item === "string" && !shouldSkipValue(item)) {
-          return translatedMap.get(item) ?? item;
-        }
-        return item;
-      });
-    }
-    return obj.map((item) => applyTranslations(item, translatedMap, null));
+  if (Array.isArray(node)) {
+    return node.map((item) => applyTranslations(item, translatedMap, key, invariantKeys));
   }
 
-  if (obj && typeof obj === "object") {
+  if (node && typeof node === "object") {
     const out = {};
-    for (const [k, v] of Object.entries(obj)) {
-      out[k] = applyTranslations(v, translatedMap, k);
+    for (const [k, v] of Object.entries(node)) {
+      out[k] = applyTranslations(v, translatedMap, k, invariantKeys);
     }
     return out;
   }
 
-  return obj;
+  return node;
 }
 
 function isRetryableError(err) {
@@ -264,35 +246,21 @@ async function translateBatch(client, texts, source, target, model) {
       out.set(chunk[j], parts[j]);
     }
   }
+
   return out;
 }
 
-async function buildTranslationMap(client, texts, source, target, model, cacheMap) {
-  const uniq = Array.from(new Set(texts));
-  const missing = uniq.filter((t) => !cacheMap.has(t));
-  if (missing.length === 0) return cacheMap;
-
-  const translatedMap = await translateBatch(client, missing, source, target, model);
-  for (const [sourceText, translatedText] of translatedMap.entries()) {
-    cacheMap.set(sourceText, translatedText);
+function deriveCode(inputPath, sourceLang, overrideCode) {
+  if (overrideCode) return overrideCode;
+  const file = path.basename(inputPath, ".json");
+  const suffix = `-${sourceLang}`;
+  if (file.toLowerCase().endsWith(suffix.toLowerCase())) {
+    return file.slice(0, file.length - suffix.length);
   }
-  return cacheMap;
+  return file;
 }
 
-function getCodeFromFilename(filename, sourceLang) {
-  const stem = getStemFromFilename(filename, sourceLang);
-  if (!stem) return null;
-  return stem;
-}
-
-function replaceLangSuffix(filename, fromLang, toLang) {
-  return filename.replace(
-    new RegExp(`-${escapeRegex(fromLang)}\\.json$`),
-    `-${toLang}.json`
-  );
-}
-
-function compareInvariantValues(source, target, pointer = "$", issues = []) {
+function compareInvariantValues(source, target, pointer = "$", issues = [], invariantKeys) {
   if (Array.isArray(source)) {
     if (!Array.isArray(target)) {
       issues.push(`${pointer}: target type mismatch (expected array)`);
@@ -303,7 +271,7 @@ function compareInvariantValues(source, target, pointer = "$", issues = []) {
     }
     const len = Math.min(source.length, target.length);
     for (let i = 0; i < len; i++) {
-      compareInvariantValues(source[i], target[i], `${pointer}[${i}]`, issues);
+      compareInvariantValues(source[i], target[i], `${pointer}[${i}]`, issues, invariantKeys);
     }
     return issues;
   }
@@ -313,19 +281,20 @@ function compareInvariantValues(source, target, pointer = "$", issues = []) {
       issues.push(`${pointer}: target type mismatch (expected object)`);
       return issues;
     }
+
     for (const [k, v] of Object.entries(source)) {
       const next = `${pointer}.${k}`;
       if (!(k in target)) {
         issues.push(`${next}: missing key in target`);
         continue;
       }
-      if (SKIP_KEYS.has(k) && typeof v === "string") {
+      if (isInvariantKey(k, invariantKeys) && typeof v === "string") {
         if (target[k] !== v) {
           issues.push(`${next}: invariant mismatch`);
         }
         continue;
       }
-      compareInvariantValues(v, target[k], next, issues);
+      compareInvariantValues(v, target[k], next, issues, invariantKeys);
     }
     for (const k of Object.keys(target)) {
       if (!(k in source)) {
@@ -345,7 +314,7 @@ function compareInvariantValues(source, target, pointer = "$", issues = []) {
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
-  if (!args.inputDir || !args.outputDir || args.langs.length === 0) {
+  if (!args.inputFile || !args.outputDir || args.langs.length === 0) {
     usage();
     process.exit(1);
   }
@@ -353,7 +322,9 @@ async function main() {
     console.error(`Target langs cannot include source lang '${args.sourceLang}'.`);
     process.exit(1);
   }
-  assertReadableDir(args.inputDir, "--input-dir");
+
+  assertReadableFile(args.inputFile, "--input-file");
+  ensureDir(args.outputDir, "--output-dir");
 
   const { secretId, secretKey, configPath } = loadCredentials(args.configPath);
   if (!secretId || !secretKey) {
@@ -363,7 +334,21 @@ async function main() {
     process.exit(1);
   }
 
-  ensureDir(args.outputDir);
+  const raw = fs.readFileSync(args.inputFile, "utf8").replace(/^\uFEFF/, "");
+  let sourceJson;
+  try {
+    sourceJson = JSON.parse(raw);
+  } catch (err) {
+    console.error(`Invalid JSON in input file '${args.inputFile}': ${err.message}`);
+    process.exit(1);
+  }
+
+  const invariantKeys = new Set([...DEFAULT_INVARIANT_KEYS, ...args.invariantKeys]);
+  const code = deriveCode(args.inputFile, args.sourceLang, args.code);
+  const strings = collectTranslatables(sourceJson, null, invariantKeys);
+  if (strings.length === 0) {
+    console.log("[warn] no translatable strings found; outputs will mirror source content");
+  }
 
   const client = new tencentcloud.hunyuan.v20230901.Client({
     credential: { secretId, secretKey },
@@ -373,70 +358,47 @@ async function main() {
     },
   });
 
-  const sourceFiles = listSourceFiles(args.inputDir, args.sourceLang).filter((file) => {
-    if (args.codes.length === 0) return true;
-    const code = getCodeFromFilename(path.basename(file), args.sourceLang);
-    return code && args.codes.includes(code);
-  });
-  if (sourceFiles.length === 0) {
-    console.error(`No source files found in ${args.inputDir} with suffix -${args.sourceLang}.json`);
-    process.exit(1);
-  }
-
-  console.log(`source files: ${sourceFiles.length}`);
-  console.log(`target langs: ${args.langs.join(", ")}`);
   const cachesByLang = new Map();
+  console.log(`source file: ${path.basename(args.inputFile)}`);
+  console.log(`target langs: ${args.langs.join(", ")}`);
 
-  for (const file of sourceFiles) {
-    const baseName = path.basename(file);
-    const code = getCodeFromFilename(baseName, args.sourceLang);
-    const raw = fs.readFileSync(file, "utf8").replace(/^\uFEFF/, "");
-    let json;
-    try {
-      json = JSON.parse(raw);
-    } catch (err) {
-      throw new Error(`Invalid JSON in source file '${baseName}': ${err.message}`);
-    }
-    const strings = collectTranslatables(json);
-    if (strings.length === 0) {
-      console.log(`[warn] ${baseName}: no translatable strings found; writing pass-through files`);
+  for (const lang of args.langs) {
+    const outName = `${code}-${lang}.json`;
+    const outPath = path.join(args.outputDir, outName);
+
+    if (!args.force && fs.existsSync(outPath)) {
+      console.log(`[skip] ${outName}`);
+      continue;
     }
 
-    for (const lang of args.langs) {
-      const outName = replaceLangSuffix(baseName, args.sourceLang, lang);
-      const outPath = path.join(args.outputDir, outName);
-
-      if (!args.force && fs.existsSync(outPath)) {
-        console.log(`[skip] ${outName}`);
-        continue;
-      }
-
-      console.log(`[run] ${code} -> ${lang}`);
-      const langCache = cachesByLang.get(lang) || new Map();
-      const translatedMap = await buildTranslationMap(
+    const langCache = cachesByLang.get(lang) || new Map();
+    const missing = Array.from(new Set(strings)).filter((text) => !langCache.has(text));
+    if (missing.length > 0) {
+      const translatedMap = await translateBatch(
         client,
-        strings,
+        missing,
         args.sourceLang,
         lang,
-        args.model,
-        langCache
+        args.model
       );
-      cachesByLang.set(lang, translatedMap);
-      const translated = applyTranslations(json, translatedMap);
-      if (args.audit) {
-        const issues = compareInvariantValues(json, translated);
-        if (issues.length > 0) {
-          throw new Error(
-            `Audit failed for ${outName}: ${issues.length} issue(s)\n${issues
-              .slice(0, 20)
-              .map((v) => `- ${v}`)
-              .join("\n")}`
-          );
-        }
-      }
-      fs.writeFileSync(outPath, JSON.stringify(translated, null, 2) + "\n", "utf8");
-      console.log(`[ok] ${outName}`);
+      for (const [k, v] of translatedMap.entries()) langCache.set(k, v);
     }
+    cachesByLang.set(lang, langCache);
+
+    const translated = applyTranslations(sourceJson, langCache, null, invariantKeys);
+    if (args.audit) {
+      const issues = compareInvariantValues(sourceJson, translated, "$", [], invariantKeys);
+      if (issues.length > 0) {
+        throw new Error(
+          `Audit failed for ${outName}: ${issues.length} issue(s)\n${issues
+            .slice(0, 20)
+            .map((v) => `- ${v}`)
+            .join("\n")}`
+        );
+      }
+    }
+    fs.writeFileSync(outPath, JSON.stringify(translated, null, 2) + "\n", "utf8");
+    console.log(`[ok] ${outName}`);
   }
 
   if (args.audit) {
